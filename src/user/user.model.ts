@@ -18,3 +18,7 @@ export interface UserUpdate {
   name?: string;
   email?: string;
 }
+
+// SQL 别名统一用户 CRUD 和认证接口的公开字段。
+export const userFields =
+  'id, name, email, username, created_at AS "createdAt", updated_at AS "updatedAt"';

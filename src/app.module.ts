@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
-import { UserModule } from './modules/user.module.js';
+import { AuthModule } from './auth/auth.module.js';
+import { UserModule } from './user/user.module.js';
 
 @Module({
-  imports: [UserModule],
+  // 先注册认证静态路由（/users/me），再注册 /users/:id。
+  imports: [AuthModule, UserModule],
 })
 export class AppModule {}
