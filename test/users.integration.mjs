@@ -102,14 +102,19 @@ test(
       await restarted.get('/api/users/me').expect(401);
       await restarted.get('/api/users').expect(401);
     } finally {
-      if (app) {
-        await app
-          .get(DatabaseService)
-          .pool.query('DELETE FROM users WHERE email = ANY($1::text[])', [
-            [email, authEmail],
-          ]);
+      // A failed restart can leave `app` pointing at an already-closed pool.
+      // Use an independent connection so cleanup does not hide the real error.
+      const cleanup = new Pool({
+        connectionString: process.env.TEST_DATABASE_URL,
+      });
+      try {
+        await cleanup.query('DELETE FROM users WHERE email = ANY($1::text[])', [
+          [email, authEmail],
+        ]);
+      } finally {
+        await cleanup.end();
+        if (app) await app.close();
       }
-      if (app) await app.close();
     }
   },
 );

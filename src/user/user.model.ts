@@ -1,8 +1,25 @@
+export interface WorkExperience {
+  id: string;
+  company: string;
+  position: string;
+  startDate: string;
+  endDate: string;
+  description: string;
+}
+
 export interface User {
   id: string;
   name: string;
   email: string;
   username: string | null;
+  location: string;
+  website: string;
+  bio: string;
+  avatar: string;
+  phone: string;
+  about: string;
+  skills: string[];
+  workExperiences: WorkExperience[];
   createdAt: string;
   updatedAt: string;
 }
@@ -19,6 +36,17 @@ export interface UserUpdate {
   email?: string;
 }
 
+export interface ProfileUpdate extends UserUpdate {
+  location?: string;
+  website?: string;
+  bio?: string;
+  avatar?: string;
+  phone?: string;
+  about?: string;
+  skills?: string[];
+  workExperiences?: WorkExperience[];
+}
+
 // SQL 别名统一用户 CRUD 和认证接口的公开字段。
 export const userFields =
-  'id, name, email, username, created_at AS "createdAt", updated_at AS "updatedAt"';
+  'id, name, email, username, location, website, bio, avatar, phone, about, skills, work_experiences AS "workExperiences", created_at AS "createdAt", updated_at AS "updatedAt"';

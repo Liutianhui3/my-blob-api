@@ -8,9 +8,11 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard.js';
+import type { AuthenticatedRequest } from '../auth/authenticated-request.js';
 import { UserService } from './user.service.js';
 
 @Controller('users')
@@ -31,6 +33,11 @@ export class UserController {
   @Post()
   create(@Body() body: unknown) {
     return this.users.create(body);
+  }
+
+  @Patch('me')
+  updateProfile(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    return this.users.updateProfile(request.user.id, body);
   }
 
   @Patch(':id')
