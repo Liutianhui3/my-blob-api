@@ -4,7 +4,7 @@ import { UserModule } from './user/user.module.js';
 import { ChatModule } from './chat/chat.module.js';
 
 @Module({
-  // 先注册认证静态路由（/users/me），再注册 /users/:id。
+  // 用户接口仅提供认证和当前账号的个人资料操作。
   imports: [AuthModule, UserModule, ChatModule],
 })
 export class AppModule {}

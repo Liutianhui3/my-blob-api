@@ -9,7 +9,7 @@ import { AuthService } from '../dist/auth/auth.service.js';
 import { UserService } from '../dist/user/user.service.js';
 import { DatabaseService } from '../dist/database/database.service.js';
 
-test('feature modules share a database and preserve auth routes and CRUD protection', async () => {
+test('feature modules preserve self-service routes and do not expose user management', async () => {
   const token = 'a'.repeat(64);
   const hash = createHash('sha256').update(token).digest('hex');
   const user = {
@@ -19,9 +19,11 @@ test('feature modules share a database and preserve auth routes and CRUD protect
     email: 'reader@example.com',
   };
   let revoked = false;
+  let queries = 0;
   const database = {
     pool: {
       async query(sql, values) {
+        queries++;
         if (sql.startsWith('SELECT user_id')) {
           return {
             rows: !revoked && values[0] === hash ? [{ user_id: user.id }] : [],
@@ -46,19 +48,28 @@ test('feature modules share a database and preserve auth routes and CRUD protect
     assert.equal(app.get(UserService).database, database);
     assert.equal(app.get(AuthService).database, database);
     const client = request(app.getHttpServer());
+    const otherId = '22222222-2222-4222-8222-222222222222';
     const routes = [
-      ['get', '/api/users', undefined, 200],
-      ['get', `/api/users/${user.id}`, undefined, 200],
-      ['post', '/api/users', { name: user.name, email: user.email }, 201],
-      ['patch', `/api/users/${user.id}`, { name: 'Updated' }, 200],
-      ['delete', `/api/users/${user.id}`, undefined, 204],
+      ['get', '/api/users'],
+      ['post', '/api/users', { name: user.name, email: user.email }],
+      ...[user.id, otherId].flatMap((id) => [
+        ['get', `/api/users/${id}`],
+        ['patch', `/api/users/${id}`, { name: 'Updated' }],
+        ['delete', `/api/users/${id}`],
+      ]),
     ];
-    for (const [method, path, body, status] of routes) {
-      await client[method](path).send(body).expect(401);
+    for (const [method, path, body] of routes) {
+      const before = queries;
+      await client[method](path).send(body).expect(404);
       await client[method](path)
         .set('Authorization', `Bearer ${token}`)
         .send(body)
-        .expect(status);
+        .expect(404);
+      assert.equal(
+        queries,
+        before,
+        `${method} ${path} must not access the database`,
+      );
     }
     await client.get('/api/users/me').expect(401);
     await client
@@ -72,7 +83,7 @@ test('feature modules share a database and preserve auth routes and CRUD protect
       `Bearer ${'b'.repeat(64)}`,
     ]) {
       await client
-        .get('/api/users')
+        .get('/api/users/me')
         .set('Authorization', authorization)
         .expect(401);
     }
@@ -99,7 +110,7 @@ test('feature modules share a database and preserve auth routes and CRUD protect
     await client
       .get('/api/users')
       .set('Authorization', `Bearer ${token}`)
-      .expect(401);
+      .expect(404);
   } finally {
     await app.close();
   }

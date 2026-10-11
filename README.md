@@ -35,55 +35,18 @@ src/
   main.ts
 ```
 
-按业务模块组织代码：`user` 负责用户 CRUD，`auth` 负责注册、登录和会话，`database` 提供共享连接池。
-用户 CRUD 统一使用 `AuthGuard` 校验身份；认证接口仍保留 `/api/users/register`、`login`、`me`、`logout` 地址。
-`AppModule` 先导入 `AuthModule`，再导入 `UserModule`，保证 `/users/me` 优先于 `/users/:id` 匹配。
+按业务模块组织代码：`user` 负责当前用户的个人资料更新，`auth` 负责注册、登录和会话，`database` 提供共享连接池。
+`PATCH /api/users/me` 使用 `AuthGuard` 校验身份，只能更新登录账号自己的资料。认证接口保留 `/api/users/register`、`login`、`me`、`logout` 地址。
 其他需要数据库的模块应导入 `DatabaseModule`，不要重复将 `DatabaseService` 加入自己的 providers。
 `ChatModule` 导入 `AuthModule`、`DatabaseModule` 和 `AiModule`，通过 `AiService` 调用模型。`AuthGuard` 校验令牌后将当前用户挂到 `request.user`，聊天接口还会验证会话所有权。
 
-| 方法   | 地址           | 功能                  |
-| ------ | -------------- | --------------------- |
-| GET    | /api/users     | 列表（数组）          |
-| GET    | /api/users/:id | 详情                  |
-| POST   | /api/users     | 创建（201）           |
-| PATCH  | /api/users/:id | 部分更新              |
-| DELETE | /api/users/:id | 删除（204，无响应体） |
+### 用户访问权限
 
-创建请求：`{"name":"张三","email":"zhangsan@example.com"}`。
-更新可以只传 name 或 email。响应包含 id（UUID）、name、email、createdAt、updatedAt。
-参数错误返回 400，不存在返回 404，邮箱重复返回 409。邮箱忽略大小写。
-错误格式：`{"statusCode":400,"message":"错误原因","error":"Bad Request"}`。
-
-前端示例：
-
-```js
-const base = 'http://localhost:3000/api';
-const token = localStorage.getItem('token'); // 登录接口返回后保存的令牌。
-async function api(path, method = 'GET', body) {
-  const response = await fetch(`${base}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-  if (response.status === 204) return;
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.message);
-  return data;
-}
-const user = await api('/users', 'POST', {
-  name: '张三',
-  email: 'zhangsan@example.com',
-});
-const users = await api('/users');
-await api(`/users/${user.id}`, 'PATCH', { name: '李四' });
-await api(`/users/${user.id}`, 'DELETE');
-```
+目前没有管理员角色，因此不公开用户列表和按 ID 操作账号的管理接口：`GET /api/users`、`POST /api/users`、`GET /api/users/:id`、`PATCH /api/users/:id`、`DELETE /api/users/:id` 均返回 404，包括已登录用户的请求。
+用户通过注册创建账号，通过 `GET /api/users/me` 查询自己，通过 `PATCH /api/users/me` 更新自己。更新目标来自登录会话，不接受请求体中的 `id`、`username`、密码或角色字段。未来恢复管理接口前，必须添加后端管理员授权检查。
 
 数据直接保存到 PostgreSQL，使用 pg 驱动和参数化 SQL。不会读取原先的 JSON 数据。
-支持账号注册和令牌登录，用户 CRUD 接口必须携带有效 Bearer Token，否则返回 401。登录用户可访问用户管理 CRUD；当前尚未区分管理员角色。
+查询、修改个人资料必须携带有效 Bearer Token，否则返回 401。错误格式：`{"statusCode":400,"message":"错误原因","error":"Bad Request"}`。
 
 ## 登录与注册
 
@@ -101,7 +64,7 @@ await api(`/users/${user.id}`, 'DELETE');
 
 ### 编辑个人资料
 
-`PATCH /api/users/me` 只使用登录会话中的用户 ID。允许部分更新，不能提交 `id`、`username`、密码或其他字段；原有 `/api/users/:id` 管理接口保持仅编辑 name、email。
+`PATCH /api/users/me` 只使用登录会话中的用户 ID。允许部分更新，不能提交 `id`、`username`、密码或其他字段；按 ID 操作用户的管理接口已关闭。
 
 ```json
 {
@@ -118,12 +81,12 @@ await api(`/users/${user.id}`, 'DELETE');
 
 头像使用 `data:image/png|jpeg|webp;base64,...`，检查图片文件头和大小，解码后最多 300 KB；前端先裁剪缩小到 256×256，原始文件不直接提交。JSON 请求体上限为 512 KB。
 
-启动时在现有迁移事务中以 `ADD COLUMN IF NOT EXISTS` 新增 `users.location VARCHAR(60)`、`website VARCHAR(240)`、`bio VARCHAR(200)`、`avatar TEXT`，均非空并默认空字符串，保留已有用户数据。数据库账号需具有修改表权限。登录、注册、`GET /api/users/me` 和用户查询响应均包含这些资料字段，不返回密码哈希。
+启动时在现有迁移事务中以 `ADD COLUMN IF NOT EXISTS` 新增 `users.location VARCHAR(60)`、`website VARCHAR(240)`、`bio VARCHAR(200)`、`avatar TEXT`，均非空并默认空字符串，保留已有用户数据。数据库账号需具有修改表权限。登录、注册、`GET /api/users/me` 响应均包含这些资料字段，不返回密码哈希。
 默认允许跨域；CORS_ORIGINS 环境变量可以指定允许的前端地址，多个用逗号分隔。PORT 可修改端口。
 
 验证：`npm.cmd run build`、`npm.cmd run lint`。
 数据库接口测试：先设置 `TEST_DATABASE_URL` 指向专用测试数据库，再运行 `node --test test/users.integration.mjs`。
-未设置测试数据库时自动跳过；测试会建表并清理自己创建的用户。
+未设置测试数据库时自动跳过；测试会建表并清理自己创建的用户。测试覆盖两账号隔离、管理接口关闭、登录会话、个人资料持久化和 CORS；无需数据库的 HTTP 测试也验证关闭的接口不访问数据库。
 
 ## AI 配置与多轮聊天
 
