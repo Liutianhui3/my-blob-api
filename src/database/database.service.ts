@@ -96,6 +96,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
           char_count INTEGER NOT NULL,
           UNIQUE(document_id, position)
         );
+        ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS model TEXT;
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS reasoning_effort VARCHAR(16);
         `);

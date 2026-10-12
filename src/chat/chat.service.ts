@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { validateAttachments } from './attachments.js';
 import { randomUUID } from 'node:crypto';
 import { DatabaseService } from '../database/database.service.js';
 import { AiService } from '../ai/ai.service.js';
@@ -16,7 +17,7 @@ import type { KnowledgeSource } from '../knowledge/rag.service.js';
 const conversationFields =
   'id, title, created_at AS "createdAt", updated_at AS "updatedAt"';
 const messageFields =
-  'id, turn_id AS "turnId", sequence::text AS sequence, role, content, status, model, reasoning_effort AS "reasoningEffort", created_at AS "createdAt"';
+  'id, turn_id AS "turnId", sequence::text AS sequence, role, content, attachments, status, model, reasoning_effort AS "reasoningEffort", created_at AS "createdAt"';
 
 export interface ChatTurn {
   conversationId: string;
@@ -94,15 +95,25 @@ export class ChatService {
     signal: AbortSignal,
   ): Promise<ChatTurn> {
     this.validateId(id);
-    const input = this.input(body, ['content', 'model', 'reasoningEffort']);
-    const content = this.text(input.content, 'content', 16_000);
+    const input = this.input(body, [
+      'content',
+      'model',
+      'reasoningEffort',
+      'attachments',
+    ]);
+    const attachments = validateAttachments(input.attachments);
+    const content = this.text(
+      input.content || (attachments.length ? '请分析附件内容。' : ''),
+      'content',
+      16_000,
+    );
     const generation = this.ai.resolveGeneration({
       model: input.model,
       reasoningEffort: input.reasoningEffort,
     });
     const { timeoutMs } = this.ai.configuration();
     // Validate the current prompt budget before inserting any messages.
-    this.ai.buildMessages([], content);
+    this.ai.buildMessages([], content, [], attachments);
     // Check conversation ownership before remote calls; do not hold SQL locks during embedding.
     let sources: KnowledgeSource[] = [];
     if (this.rag) {
@@ -131,7 +142,7 @@ export class ChatService {
         [id],
       );
       const history = await client.query<HistoryTurn>(
-        `SELECT u.content AS "user", a.content AS assistant
+        `SELECT u.content AS "user", u.attachments, a.content AS assistant
          FROM messages u JOIN messages a ON a.conversation_id = u.conversation_id
            AND a.turn_id = u.turn_id AND a.role = 'assistant' AND a.status = 'completed'
          WHERE u.conversation_id = $1 AND u.role = 'user' AND u.status = 'completed'
@@ -142,6 +153,7 @@ export class ChatService {
         history.rows.reverse(),
         content,
         sources,
+        attachments,
       );
       await client.query(
         `UPDATE conversations SET generation_id = $2,
@@ -161,6 +173,10 @@ export class ChatService {
           generation.model,
           generation.reasoningEffort,
         ],
+      );
+      await client.query(
+        'UPDATE messages SET attachments = $2::jsonb WHERE id = $1',
+        [userMessageId, JSON.stringify(attachments)],
       );
       signal.throwIfAborted();
       await client.query('COMMIT');
