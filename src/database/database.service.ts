@@ -68,9 +68,42 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         );
         CREATE INDEX IF NOT EXISTS messages_conversation_sequence
           ON messages (conversation_id, sequence DESC);
+        CREATE TABLE IF NOT EXISTS knowledge_bases (
+          id UUID PRIMARY KEY,
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          name VARCHAR(80) NOT NULL,
+          description VARCHAR(300) NOT NULL DEFAULT '',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_bases_user ON knowledge_bases(user_id);
+        CREATE TABLE IF NOT EXISTS knowledge_documents (
+          id UUID PRIMARY KEY,
+          base_id UUID NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+          name VARCHAR(255) NOT NULL,
+          size INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          chunk_size INTEGER NOT NULL,
+          chunk_overlap INTEGER NOT NULL,
+          chunk_count INTEGER NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS knowledge_documents_base ON knowledge_documents(base_id);
+        CREATE TABLE IF NOT EXISTS knowledge_chunks (
+          id UUID PRIMARY KEY,
+          document_id UUID NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+          position INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          char_count INTEGER NOT NULL,
+          UNIQUE(document_id, position)
+        );
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS model TEXT;
         ALTER TABLE messages ADD COLUMN IF NOT EXISTS reasoning_effort VARCHAR(16);
         `);
+        if (process.env.EMBEDDING_MODEL) {
+          await client.query(`CREATE EXTENSION IF NOT EXISTS vector;
+            ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS embedding vector(1024);
+            ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS embedding_model TEXT;`);
+        }
         await client.query('COMMIT');
       } catch (error) {
         await client.query('ROLLBACK').catch(() => {});

@@ -10,6 +10,8 @@ import { DatabaseService } from '../database/database.service.js';
 import { AiService } from '../ai/ai.service.js';
 import type { AiMessage, HistoryTurn } from '../ai/ai.service.js';
 import type { GenerationSettings } from '../ai/model-catalog.js';
+import { RagService } from '../knowledge/rag.service.js';
+import type { KnowledgeSource } from '../knowledge/rag.service.js';
 
 const conversationFields =
   'id, title, created_at AS "createdAt", updated_at AS "updatedAt"';
@@ -30,6 +32,7 @@ export class ChatService {
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
     @Inject(AiService) private readonly ai: AiService,
+    @Inject(RagService) private readonly rag?: RagService,
   ) {}
 
   async create(userId: string, body: unknown) {
@@ -100,6 +103,13 @@ export class ChatService {
     const { timeoutMs } = this.ai.configuration();
     // Validate the current prompt budget before inserting any messages.
     this.ai.buildMessages([], content);
+    // Check conversation ownership before remote calls; do not hold SQL locks during embedding.
+    let sources: KnowledgeSource[] = [];
+    if (this.rag) {
+      await this.owned(userId, id);
+      sources = await this.rag.retrieve(userId, content, signal);
+    }
+    signal.throwIfAborted();
     const generationId = randomUUID();
     const userMessageId = randomUUID();
     const messageId = randomUUID();
@@ -128,7 +138,11 @@ export class ChatService {
          ORDER BY u.sequence DESC LIMIT 50`,
         [id],
       );
-      const messages = this.ai.buildMessages(history.rows.reverse(), content);
+      const messages = this.ai.buildMessages(
+        history.rows.reverse(),
+        content,
+        sources,
+      );
       await client.query(
         `UPDATE conversations SET generation_id = $2,
          generation_expires_at = NOW() + ($3::int * INTERVAL '1 millisecond'), updated_at = NOW()

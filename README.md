@@ -1,5 +1,15 @@
 # 用户与 AI 聊天 API
 
+## 知识库向量化与检索
+
+配置 `.env` 的 `EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1`、`EMBEDDING_API_KEY` 和 `EMBEDDING_MODEL=BAAI/bge-m3`。该模型输出 1024 维向量。PostgreSQL 需要安装 pgvector（本机 Homebrew 可用 `brew install pgvector`），应用启动时启用扩展并添加向量字段，账号需要创建扩展及修改表权限。
+
+上传文档仍然只解析、切片和保存。之后携带 Bearer Token 调用 `POST /api/knowledge-bases/:id/documents/:documentId/embeddings`，可处理已有文档；返回模型、维度和已向量化片段数。远程调用每批最多 16 片，失败不改变已有向量，重试会重新计算整份文档。每批超时 60 秒，大文档可能需要更长的客户端超时。文档片段会发送到配置的远程服务。
+
+调用 `POST /api/knowledge-bases/:id/search`，JSON 示例：`{"query":"专业版每月多少钱？","limit":5}`。返回按余弦相似度排序的片段、文档名、片段位置和 score（相似度，不是答案置信度）。仅检索当前用户指定知识库中已向量化的片段。目前采用精确向量检索，尚未添加近似检索索引。
+
+聊天接口无需修改前端请求：后端以本轮问题检索当前用户全部知识库，取余弦相似度至少 0.35 的最多 5 个片段，在模型输入预算内作为参考资料加入，并要求回答注明文档名和片段编号。没有配置 embedding、没有已向量化文档或没有匹配片段时，保持普通聊天。已有可检索文档但向量服务失败时返回错误，避免悄悄绕过资料作答。检索支持请求取消与聊天总超时；文档和历史中的指令不具备系统指令权限。当前未实现前端知识库选择、结构化引用展示或多轮问题改写。
+
 先填写项目根目录 `.env` 中的 PostgreSQL 连接信息（模板见 `.env.example`）。
 在 pgAdmin 或 psql 中先创建数据库：`CREATE DATABASE my_blob_api;`，也可使用自己的数据库名称。
 启动：`npm.cmd run start:dev`，默认地址 `http://localhost:3000/api`。
