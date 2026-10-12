@@ -74,8 +74,12 @@ export class KnowledgeService {
   async documents(userId: string, id: string) {
     await this.owned(userId, id);
     const result = await this.database.pool.query(
-      `SELECT ${documentFields} FROM knowledge_documents WHERE base_id = $1 ORDER BY created_at DESC`,
-      [id],
+      `SELECT ${documentFields},
+       (SELECT COUNT(*)::int FROM knowledge_chunks c
+        WHERE c.document_id=knowledge_documents.id AND c.embedding IS NOT NULL
+          AND c.embedding_model=$2) AS "embeddedChunks"
+       FROM knowledge_documents WHERE base_id = $1 ORDER BY created_at DESC`,
+      [id, process.env.EMBEDDING_MODEL?.trim() || 'BAAI/bge-m3'],
     );
     return result.rows;
   }
