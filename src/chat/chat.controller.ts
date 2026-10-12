@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   Body,
   Controller,
+  Delete,
   GatewayTimeoutException,
   Get,
   HttpException,
@@ -46,6 +47,11 @@ export class ChatController {
   @Get('models')
   models() {
     return this.ai.models();
+  }
+
+  @Delete(':id')
+  remove(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
+    return this.chats.remove(request.user.id, id);
   }
 
   @Get(':id/messages')

@@ -208,6 +208,17 @@ export class ChatService {
     }
   }
 
+  async remove(userId: string, id: string) {
+    this.validateId(id);
+    // 同一条 SQL 校验归属并删除；messages 通过外键 ON DELETE CASCADE 一起清理。
+    const result = await this.database.pool.query(
+      'DELETE FROM conversations WHERE id = $1 AND user_id = $2 RETURNING id',
+      [id, userId],
+    );
+    if (!result.rowCount) throw new NotFoundException('会话不存在');
+    return { id };
+  }
+
   private async owned(userId: string, id: string) {
     this.validateId(id);
     const result = await this.database.pool.query(
