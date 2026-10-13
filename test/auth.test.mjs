@@ -48,7 +48,7 @@ test('registration hashes passwords, login rejects bad credentials, logout revok
       },
     },
   };
-  const auth = new AuthService(database);
+  const auth = new AuthService(database, { verify: async () => {} });
   await assert.rejects(
     auth.register({ username: 'ab', email: 'bad', password: 'short' }),
     /用户名/,

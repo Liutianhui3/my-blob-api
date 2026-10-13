@@ -9,6 +9,7 @@ export interface WorkExperience {
 
 export interface User {
   id: string;
+  isAdmin: boolean;
   name: string;
   email: string;
   username: string | null;
@@ -49,4 +50,4 @@ export interface ProfileUpdate extends UserUpdate {
 
 // SQL 别名统一用户 CRUD 和认证接口的公开字段。
 export const userFields =
-  'id, name, email, username, location, website, bio, avatar, phone, about, skills, work_experiences AS "workExperiences", created_at AS "createdAt", updated_at AS "updatedAt"';
+  'id, is_admin AS "isAdmin", name, email, username, location, website, bio, avatar, phone, about, skills, work_experiences AS "workExperiences", created_at AS "createdAt", updated_at AS "updatedAt"';

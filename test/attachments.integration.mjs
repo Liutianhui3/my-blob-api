@@ -1,3 +1,4 @@
+import { CaptchaService } from '../dist/auth/captcha.service.js';
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,7 +21,8 @@ test('attachments survive SQL history and reach the model on later turns', { ski
   const upstream = [];
   ai.openStream = async messages => { upstream.push(messages); return (async function* () { yield { text: '已读取附件', finishReason: 'stop' }; })(); };
   const module = await Test.createTestingModule({ imports: [AppModule] })
-    .overrideProvider(DatabaseService).useValue(database)
+    .overrideProvider(CaptchaService).useValue({ verify: async () => {} })
+        .overrideProvider(DatabaseService).useValue(database)
     .overrideProvider(AiService).useValue(ai)
     .overrideProvider(RagService).useValue({ retrieve: async () => [] }).compile();
   const app = module.createNestApplication({ logger: false });

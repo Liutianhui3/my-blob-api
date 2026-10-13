@@ -28,6 +28,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
         CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users (LOWER(email));
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(32);
         ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
         ALTER TABLE users ADD COLUMN IF NOT EXISTS location VARCHAR(60) NOT NULL DEFAULT '';
@@ -44,6 +45,23 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
           user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           expires_at TIMESTAMPTZ NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS articles (
+          id UUID PRIMARY KEY,
+          user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          title VARCHAR(160) NOT NULL,
+          summary VARCHAR(300) NOT NULL DEFAULT '',
+          content TEXT NOT NULL DEFAULT '',
+          category VARCHAR(40) NOT NULL DEFAULT '随笔',
+          tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+          cover_url VARCHAR(2000) NOT NULL DEFAULT '',
+          status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+          version INTEGER NOT NULL DEFAULT 1,
+          published_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS articles_owner_updated ON articles(user_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS articles_published ON articles(published_at DESC) WHERE status = 'published';
         CREATE TABLE IF NOT EXISTS conversations (
           id UUID PRIMARY KEY,
           user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,

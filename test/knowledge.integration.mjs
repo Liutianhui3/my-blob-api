@@ -1,3 +1,4 @@
+import { CaptchaService } from '../dist/auth/captcha.service.js';
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,7 +13,8 @@ test('knowledge multipart upload, SQL persistence, ownership, pagination and cas
   const database = new DatabaseService();
   await database.pool.end();
   database.pool = new Pool({ connectionString: process.env.TEST_DATABASE_URL });
-  const module = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(DatabaseService).useValue(database).compile();
+  const module = await Test.createTestingModule({ imports: [AppModule] }).overrideProvider(CaptchaService).useValue({ verify: async () => {} })
+        .overrideProvider(DatabaseService).useValue(database).compile();
   const app = module.createNestApplication({ logger: false });
   app.setGlobalPrefix('api');
   const users = [];

@@ -1,10 +1,12 @@
 # My Blob API
 
-面向 AI 工作台的后端服务，提供用户认证、个人资料管理、多轮流式聊天与知识库检索增强生成（RAG）。基于 NestJS、TypeScript 和 PostgreSQL 构建，通过 Chat Completions 兼容协议接入模型服务，使用 pgvector 保存和检索文档向量。
+面向个人博客与 AI 工作台的后端服务，提供用户认证、个人资料管理、文章发布、管理员角色管理、多轮流式聊天与知识库检索增强生成（RAG）。基于 NestJS、TypeScript 和 PostgreSQL 构建，通过 Chat Completions 兼容协议接入模型服务，使用 pgvector 保存和检索文档向量。
 
 ## 功能概览
 
 - **用户认证**：注册、登录、注销与 Bearer Token 会话认证；密码使用随机盐与 scrypt 哈希，会话令牌仅以 SHA-256 哈希存储。
+- **文章与角色管理**：公开阅读已发布文章；管理员管理草稿、发布与删除文章，以及配置用户角色。富文本由后端清理，文章更新通过版本号检测编辑冲突。
+- **聊天附件**：支持 PNG / JPEG / WebP 图片与 TXT / Markdown 文档，附件随消息持久化；图片理解依赖所选上游模型的视觉能力。
 - **个人资料**：支持基本信息、头像、技能与工作经历的部分更新，仅允许操作当前账号。
 - **流式聊天**：POST SSE、多轮上下文、模型白名单、思考档位、超时与取消处理、消息持久化。
 - **知识库管理**：创建知识库，上传 UTF-8 TXT / Markdown，按字符切片、分页预览与删除文档。
@@ -35,6 +37,8 @@ flowchart LR
 | ------------------------- | --------------------------------------------- |
 | `src/auth`                | 注册、登录、会话令牌与认证守卫                |
 | `src/user`                | 当前用户的个人资料校验与更新                  |
+| `src/article`             | 公开文章、管理员编辑、富文本清理与版本冲突检测 |
+| `src/roles`               | 管理员用户查询、角色修改与最后一位管理员保护 |
 | `src/database`            | PostgreSQL 连接池、启动时建表与增量结构初始化 |
 | `src/ai`                  | 模型配置、白名单、上游调用与 SSE 解码         |
 | `src/chat`                | 会话管理、消息持久化、上下文预算与流式响应    |
@@ -151,7 +155,7 @@ npm run start:prod
 
 ## API 参考
 
-所有接口统一使用 `/api` 前缀。除注册和登录外，下表接口均需有效会话令牌：
+所有接口统一使用 `/api` 前缀。注册、登录和已发布文章的公开查询无需登录；其余接口需要有效会话令牌，文章管理与角色管理还需管理员权限：
 
 ```http
 Authorization: Bearer <token>
@@ -169,7 +173,7 @@ Authorization: Bearer <token>
 
 用户名为 3–32 位字母、数字或下划线，忽略大小写且唯一；注册密码为 8–128 位，需包含字母和数字。登录会话有效期一天。
 
-个人资料支持 `name`、`email`、`location`、`website`、`bio`、`avatar`、`phone`、`about`、`skills`、`workExperiences`。省略字段保持原值，未知字段返回 400。头像支持 PNG / JPEG / WebP 的 Base64 Data URL，解码后最多 300 KB；JSON 请求体上限为 1 MB。技能最多 30 项，工作经历最多 20 段。
+个人资料支持 `name`、`email`、`location`、`website`、`bio`、`avatar`、`phone`、`about`、`skills`、`workExperiences`。省略字段保持原值，未知字段返回 400。头像支持 PNG / JPEG / WebP 的 Base64 Data URL，解码后最多 300 KB；全局 JSON 请求体上限为 12 MB（用于容纳聊天图片的 Base64 数据）。技能最多 30 项，工作经历最多 20 段。
 
 工作经历格式：
 
@@ -188,7 +192,29 @@ Authorization: Bearer <token>
 }
 ```
 
-当前未提供管理员用户管理接口，用户列表与按 ID 操作账号的接口返回 404。
+### 文章与管理员角色
+
+| 方法 | 路径 | 权限与功能 |
+| --- | --- | --- |
+| GET | `/api/articles` | 公开查询已发布文章，支持 `page`、`limit`、`q`、`category` |
+| GET | `/api/articles/:id` | 公开读取已发布文章正文 |
+| GET | `/api/articles/manage` | 管理员查询文章，支持草稿 / 发布状态筛选 |
+| GET | `/api/articles/manage/:id` | 管理员读取待编辑文章，包含版本号 |
+| POST | `/api/articles` | 管理员新建文章 |
+| PATCH | `/api/articles/:id` | 管理员更新文章，必须提交当前 `version` |
+| DELETE | `/api/articles/:id` | 管理员删除文章 |
+| GET | `/api/admin/users` | 管理员分页查询用户，支持 `q`、`page`、`role`（`admin` / `user`） |
+| PATCH | `/api/admin/users/:id/role` | 管理员提交 `{ "isAdmin": true }` 或 `{ "isAdmin": false }` 修改角色 |
+
+文章支持 `title`、`summary`、`content`（HTML）、`category`、`tags`、`coverUrl` 和 `status`（`draft` / `published`）。更新需提交完整编辑内容及当前版本号，版本冲突返回 409。公开接口仅返回已发布文章；后端清理富文本中的不允许标签与属性。角色修改通过数据库事务与锁串行处理，禁止撤销最后一位管理员。
+
+新注册账号默认不是管理员。首位管理员需由数据库维护者在应用完成表结构初始化后，针对已注册账号设置：
+
+```sql
+UPDATE users SET is_admin = TRUE WHERE username = 'your-admin-username';
+```
+
+后续角色配置可使用管理页面；前端入口隐藏和路由守卫之外，后端也会校验管理员权限。
 
 ### 聊天
 
@@ -196,6 +222,7 @@ Authorization: Bearer <token>
 | ---- | ---------------------------------------- | ---------------------------------------------- |
 | POST | `/api/conversations`                     | 创建会话，提交 `{}` 或 `{ "title": "新对话" }` |
 | GET  | `/api/conversations`                     | 查询最近更新的最多 100 个会话                  |
+| DELETE | `/api/conversations/:id`                 | 删除当前用户会话及关联消息                     |
 | GET  | `/api/conversations/models`              | 获取默认模型、模型列表与可用思考档位           |
 | GET  | `/api/conversations/:id/messages`        | 查询历史，支持 `before` 和 `limit`             |
 | POST | `/api/conversations/:id/messages/stream` | 发送消息并读取 SSE 回复                        |
@@ -210,7 +237,9 @@ Authorization: Bearer <token>
 }
 ```
 
-`model` 和 `reasoningEffort` 可省略。消息最多 16000 字符，同时受上下文字节预算限制。历史分页的 `limit` 为 1–100，`before` 使用消息 `sequence`；该字段返回字符串以保留 bigint 精度。
+`model` 和 `reasoningEffort` 可省略。消息最多 16000 字符，同时受上下文字节预算限制。可选 `attachments` 数组最多 4 个附件，总大小上限 6 MB：图片单张最多 2 MB，提交 `name`、`type: "image"`、`mime` 与 Base64 Data URL `data`；TXT / Markdown 文档单份最多 100,000 字节，提交 `name`、`type: "document"` 与 UTF-8 正文 `text`。图片仅支持 PNG / JPEG / WebP，后端校验格式与文件头。附件会保存到消息中，并纳入后续上下文预算；图片能否解析取决于模型能力，文档正文直接加入对话，不会自动进入知识库。
+
+历史分页的 `limit` 为 1–100，`before` 使用消息 `sequence`；该字段返回字符串以保留 bigint 精度。
 
 #### SSE 协议
 
@@ -357,8 +386,19 @@ SSE 路由需关闭代理响应缓冲和缓存，并配置大于聊天超时的�
 - 使用精确向量检索，未引入近似索引、关键词混合检索或重排序。
 - 向量化为同步请求，未提供后台队列、任务进度和自动重试。
 - 聊天检索范围为当前用户全部知识库，未提供知识库选择、多轮问题改写和严格的资料不足拒答模式。
-- 权限按用户隔离，未提供企业租户、部门、管理员与文档级授权。
-- 模型适配器当前处理文本 Chat Completions，不支持原生 Responses 协议、工具调用或多模态。
+- 权限按用户隔离，已提供用户 / 管理员两级角色，但未提供企业租户、部门与文档级授权。
+- 模型适配器支持 Chat Completions 文本与图片输入，输出为文本流；不支持原生 Responses 协议、工具调用、音频或视频输入。
 - 数据库结构由启动时 DDL 初始化，尚未采用独立版本化迁移流程。
 
 建议优先扩展 PDF 解析与页码来源，再建立真实问题评测集，根据结果完善检索策略、后台任务和权限体系。
+
+
+## 登录真人验证
+
+登录请求必须通过腾讯云 `DescribeCaptchaResult` 验证后才校验密码和签发会话。前端发送 `captchaTicket`、`captchaRandstr`，验证码应用 ID 与前端保持一致。
+
+在后端 `.env` 设置 `TENCENT_CAPTCHA_APP_ID`、`TENCENT_CAPTCHA_APP_SECRET_KEY`（验证码应用密钥）、`TENCENT_SECRET_ID` 和 `TENCENT_SECRET_KEY`（腾讯云 API 访问凭证，需具有调用 DescribeCaptchaResult 的权限）。应用密钥不能代替 API 访问凭证。所有密钥仅留在本地或部署平台的环境变量中。
+
+验证码缺失、失效、重放、容灾票据、上游异常或配置缺失均拒绝登录。注册接口本次不变。反向代理部署时，将可信代理 IP/CIDR 配入 `TRUST_PROXY`，代理应覆盖转发 IP 头；默认不信任客户端自带的 X-Forwarded-For。
+
+测试使用模拟腾讯云响应，不调用真实验证码服务；数据库集成测试单独替换验证码 provider，避免依赖真实人机挑战。

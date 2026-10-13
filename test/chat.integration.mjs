@@ -1,3 +1,4 @@
+import { CaptchaService } from '../dist/auth/captcha.service.js';
 import 'reflect-metadata';
 import 'dotenv/config';
 import { test } from 'node:test';
@@ -53,7 +54,8 @@ test(
       })();
     };
     const module = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(DatabaseService)
+      .overrideProvider(CaptchaService).useValue({ verify: async () => {} })
+        .overrideProvider(DatabaseService)
       .useValue(database)
       .overrideProvider(AiService)
       .useValue(ai)

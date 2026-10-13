@@ -1,3 +1,5 @@
+import { RolesModule } from './roles/roles.module.js';
+import { ArticleModule } from './article/article.module.js';
 import { KnowledgeModule } from './knowledge/knowledge.module.js';
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module.js';
@@ -6,6 +8,13 @@ import { ChatModule } from './chat/chat.module.js';
 
 @Module({
   // 用户接口仅提供认证和当前账号的个人资料操作。
-  imports: [AuthModule, UserModule, ChatModule, KnowledgeModule],
+  imports: [
+    AuthModule,
+    UserModule,
+    ChatModule,
+    KnowledgeModule,
+    ArticleModule,
+    RolesModule,
+  ],
 })
 export class AppModule {}
