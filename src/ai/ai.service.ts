@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   Injectable,
+  Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import type { Attachment } from '../chat/attachments.js';
@@ -33,6 +34,8 @@ export interface AiDelta {
 
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
+
   models() {
     const { model } = this.configuration();
     // Expose configured choices without provider credentials or transport details.
@@ -167,6 +170,7 @@ export class AiService {
     const { apiKey, url, maxTokens } = this.configuration();
     const { model, reasoningEffort, tokenParameter } =
       settings ?? this.resolveGeneration();
+    const startedAt = Date.now();
     let response: Response;
     try {
       response = await fetch(url, {
@@ -189,6 +193,11 @@ export class AiService {
       });
     } catch (error) {
       if (signal.aborted) throw error;
+      this.logger.error({
+        event: 'ai_connection_failed',
+        elapsedMs: Date.now() - startedAt,
+        ...this.connectionErrorDetails(error),
+      });
       throw new BadGatewayException('无法连接模型服务');
     }
     if (
@@ -196,10 +205,48 @@ export class AiService {
       !response.body ||
       !response.headers.get('content-type')?.includes('text/event-stream')
     ) {
+      this.logger.error({
+        event: 'ai_invalid_stream_response',
+        elapsedMs: Date.now() - startedAt,
+        status: response.status,
+        isEventStream: Boolean(
+          response.headers.get('content-type')?.includes('text/event-stream'),
+        ),
+        hasBody: Boolean(response.body),
+      });
       await response.body?.cancel().catch(() => {});
       throw new BadGatewayException('模型服务未返回有效的流式响应');
     }
     return this.readCompletion(response.body, signal);
+  }
+
+  // Log only error identifiers: messages, URLs and stacks can contain credentials.
+  private connectionErrorDetails(error: unknown, depth = 0): object {
+    if (!error || typeof error !== 'object' || depth > 3) return {};
+    const value = error as {
+      name?: unknown;
+      code?: unknown;
+      cause?: unknown;
+      errors?: unknown;
+    };
+    const identifier = (input: unknown) =>
+      typeof input === 'string' && /^[a-zA-Z0-9_]{1,80}$/.test(input)
+        ? input
+        : undefined;
+    return {
+      name: identifier(value.name),
+      code: identifier(value.code),
+      ...(value.cause
+        ? { cause: this.connectionErrorDetails(value.cause, depth + 1) }
+        : {}),
+      ...(Array.isArray(value.errors)
+        ? {
+            errors: value.errors
+              .slice(0, 5)
+              .map((item) => this.connectionErrorDetails(item, depth + 1)),
+          }
+        : {}),
+    };
   }
 
   private async *readCompletion(
