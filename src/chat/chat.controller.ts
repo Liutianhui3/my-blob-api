@@ -14,8 +14,13 @@ import {
   Req,
   Res,
   UseGuards,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
 import { once } from 'node:events';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { extractDocument } from './document-extraction.js';
+import { downloadRemoteImage } from './image-download.js';
 import type { Response } from 'express';
 import { AiService } from '../ai/ai.service.js';
 import type { AiDelta } from '../ai/ai.service.js';
@@ -49,9 +54,54 @@ export class ChatController {
     return this.ai.models();
   }
 
+  @Post('attachments/extract')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1, fields: 0 },
+    }),
+  )
+  extractAttachment(@UploadedFile() file: Express.Multer.File) {
+    return extractDocument(file);
+  }
+
   @Delete(':id')
   remove(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
     return this.chats.remove(request.user.id, id);
+  }
+
+  @Post(':id/messages/:messageId/images/download')
+  async downloadImage(
+    @Req() request: AuthenticatedRequest,
+    @Res() response: Response,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() body: unknown,
+  ) {
+    const source = await this.chats.imageForDownload(
+      request.user.id,
+      id,
+      messageId,
+      body,
+    );
+    const controller = new AbortController();
+    const disconnect = () => controller.abort();
+    response.once('close', disconnect);
+    try {
+      const image = await downloadRemoteImage(
+        source,
+        AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]),
+      );
+      response
+        .set({
+          'Content-Type': image.mime,
+          'Content-Disposition': `attachment; filename="AI-image.${image.extension}"`,
+          'Cache-Control': 'private, no-store',
+          'X-Content-Type-Options': 'nosniff',
+        })
+        .send(image.bytes);
+    } finally {
+      response.off('close', disconnect);
+    }
   }
 
   @Get(':id/messages')
@@ -122,9 +172,14 @@ export class ChatController {
       });
       for await (const delta of stream) {
         signal.throwIfAborted();
+        if (delta.imageGeneration) {
+          await this.event(response, signal, 'image_generation', {
+            status: delta.imageGeneration,
+          });
+        }
         if (delta.text) {
           bytes += Buffer.byteLength(delta.text, 'utf8');
-          if (bytes > 1_048_576)
+          if (bytes > 12_000_000)
             throw new BadGatewayException('模型回复超过长度限制');
           content += delta.text;
           await this.event(response, signal, 'delta', { text: delta.text });

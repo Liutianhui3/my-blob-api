@@ -1,4 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
+import { extname } from 'node:path';
+export const documentMimes: Record<string, string> = {
+  '.docx':
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pdf': 'application/pdf',
+  '.pptx':
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
 export interface Attachment {
   name: string;
   type: 'image' | 'document';
@@ -21,20 +30,20 @@ export function validateAttachments(value: unknown): Attachment[] {
       throw new BadRequestException('附件名称无效');
     if (item.type === 'document') {
       if (
-        !/\.(txt|md)$/i.test(item.name) ||
+        !/\.(txt|md|docx|xlsx|pdf|pptx)$/i.test(item.name) ||
         typeof item.text !== 'string' ||
         !item.text.trim() ||
         item.text.includes('\0') ||
         Buffer.byteLength(item.text) > 100000
       )
         throw new BadRequestException(
-          '文档仅支持非空 TXT / Markdown，最大 100 KB',
+          '文档支持 TXT、Markdown、DOCX、XLSX、PDF、PPTX，提取文字最大 100 KB',
         );
       total += Buffer.byteLength(item.text);
       return {
         name: item.name,
         type: 'document',
-        mime: 'text/plain',
+        mime: documentMimes[extname(item.name).toLowerCase()] ?? 'text/plain',
         text: item.text,
       };
     }

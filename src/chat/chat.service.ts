@@ -57,6 +57,30 @@ export class ChatService {
     return result.rows;
   }
 
+  async imageForDownload(
+    userId: string,
+    id: string,
+    messageId: string,
+    body: unknown,
+  ) {
+    this.validateId(id);
+    this.validateId(messageId);
+    const input = this.input(body, ['url']);
+    const url = this.text(input.url, 'url', 8192);
+    const result = await this.database.pool.query<{ content: string }>(
+      `SELECT m.content FROM messages m JOIN conversations c ON c.id = m.conversation_id
+       WHERE c.id = $1 AND c.user_id = $2 AND m.id = $3 AND m.role = 'assistant'`,
+      [id, userId, messageId],
+    );
+    const content = result.rows[0]?.content;
+    if (
+      !content ||
+      (!content.includes(`](<${url}>)`) && !content.includes(`](${url})`))
+    )
+      throw new NotFoundException('图片不存在或无权下载');
+    return url;
+  }
+
   async history(
     userId: string,
     id: string,

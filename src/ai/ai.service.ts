@@ -4,12 +4,14 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
+  HttpException,
 } from '@nestjs/common';
 import type { Attachment } from '../chat/attachments.js';
 import { sseData } from './sse.js';
 import { modelCatalog, resolveGeneration } from './model-catalog.js';
 import type { GenerationOptions, GenerationSettings } from './model-catalog.js';
 import type { KnowledgeSource } from '../knowledge/rag.service.js';
+import { imageTool, imageMarkdown, generateImage } from './image-generation.js';
 
 export interface AiMessage {
   role: 'system' | 'user' | 'assistant';
@@ -29,6 +31,7 @@ export interface HistoryTurn {
 
 export interface AiDelta {
   text?: string;
+  imageGeneration?: 'generating';
   finishReason?: 'stop' | 'length';
 }
 
@@ -97,7 +100,12 @@ export class AiService {
     attachments: Attachment[] = [],
   ): AiMessage[] {
     const { systemPrompt, contextMaxBytes } = this.configuration();
-    const system: AiMessage = { role: 'system', content: systemPrompt };
+    const system: AiMessage = {
+      role: 'system',
+      content:
+        systemPrompt +
+        '\n当用户要求生成或下载 Excel/xlsx 表格文件时，使用标记为 xlsx 的 Markdown 代码围栏输出严格 JSON 数据，前端会将其转换为真正的 .xlsx 文件下载卡片。格式：{"filename":"表格.xlsx","sheets":[{"name":"Sheet1","rows":[["列名","数值"],["示例",123]]}]}。rows 第一行是表头；单元格仅允许字符串、数字、布尔值或 null，不允许公式对象、代码或 base64。工作表名须唯一且不超过31字符，不含 \\ / ? * [ ] :。每个文件最多20张表、总计100000个单元格，每行最多256列，每表最多10000行。仅在用户要求文件时使用此格式，不要返回 Python/JavaScript 生成代码，也不要编造下载链接。数据过多时先请用户缩小范围。务必完整关闭代码围栏。',
+    };
     const current: AiMessage = {
       role: 'user',
       content: this.attachmentContent(content, attachments),
@@ -149,7 +157,13 @@ export class AiService {
           role: 'user',
           content: this.attachmentContent(turn.user, turn.attachments ?? []),
         },
-        { role: 'assistant', content: turn.assistant },
+        {
+          role: 'assistant',
+          content: turn.assistant.replace(
+            /!\[[^\]]*\]\(<?data:image\/[^\s)]+>?\)/g,
+            '[已生成图片]',
+          ),
+        },
       ];
       const pairSize = pair.reduce(
         (sum, message) => sum + this.messageBytes(message),
@@ -184,6 +198,9 @@ export class AiService {
           model,
           messages,
           stream: true,
+          ...(process.env.AI_IMAGE_TOOLS_ENABLED === 'false'
+            ? {}
+            : { tools: [imageTool] }),
           [tokenParameter]: maxTokens,
           ...(reasoningEffort === 'auto'
             ? {}
@@ -217,7 +234,7 @@ export class AiService {
       await response.body?.cancel().catch(() => {});
       throw new BadGatewayException('模型服务未返回有效的流式响应');
     }
-    return this.readCompletion(response.body, signal);
+    return this.readCompletion(response.body, signal, model);
   }
 
   // Log only error identifiers: messages, URLs and stacks can contain credentials.
@@ -252,13 +269,41 @@ export class AiService {
   private async *readCompletion(
     body: ReadableStream<Uint8Array>,
     signal: AbortSignal,
+    model: string,
   ): AsyncGenerator<AiDelta> {
     let finished = false;
     let hasText = false;
+    let toolName = '';
+    let toolArguments = '';
+    let toolId = '';
+    const seenImages = new Set<string>();
     try {
       for await (const data of sseData(body)) {
         signal.throwIfAborted();
         if (data === '[DONE]') {
+          if (finished && toolName) {
+            if (toolName !== 'generate_image') throw new Error('Unknown tool');
+            const args = JSON.parse(toolArguments);
+            if (
+              typeof args.prompt !== 'string' ||
+              !args.prompt.trim() ||
+              args.prompt.length > 16000
+            )
+              throw new Error('Invalid image prompt');
+            const config = this.configuration();
+            yield { imageGeneration: 'generating' };
+            yield {
+              text: await generateImage({
+                apiKey: process.env.AI_IMAGE_API_KEY?.trim() || config.apiKey,
+                chatUrl: config.url,
+                model: process.env.AI_IMAGE_MODEL?.trim() || model,
+                prompt: args.prompt,
+                signal,
+              }),
+            };
+            yield { finishReason: 'stop' };
+            return;
+          }
           if (!finished || !hasText) throw new Error('Incomplete model reply');
           return;
         }
@@ -269,9 +314,53 @@ export class AiService {
           (item: { index: number }) => item.index === 0,
         );
         if (!choice) continue; // Some services append a usage-only event.
-        if (choice.delta?.tool_calls || choice.delta?.function_call)
-          throw new Error('Tool calls are not supported');
-        const text = choice.delta?.content;
+        if (choice.delta?.function_call)
+          throw new Error('Legacy tool calls are not supported');
+        for (const tool of choice.delta?.tool_calls ?? []) {
+          if (
+            finished ||
+            tool.index !== 0 ||
+            (toolId && tool.id && toolId !== tool.id)
+          )
+            throw new Error('Only one image tool is supported per turn');
+          if (tool.id) toolId = tool.id;
+          if (tool.function?.name) toolName += tool.function.name;
+          if (tool.function?.arguments)
+            toolArguments += tool.function.arguments;
+          if (toolName.length > 80 || toolArguments.length > 20000)
+            throw new Error('Tool input too large');
+        }
+        let text = choice.delta?.content;
+        if (Array.isArray(text)) {
+          text = text
+            .map(
+              (part: {
+                type: string;
+                text?: string;
+                image_url?: { url?: string } | string;
+              }) => {
+                if (part.type === 'text') return part.text ?? '';
+                if (part.type === 'image_url') {
+                  const url =
+                    typeof part.image_url === 'string'
+                      ? part.image_url
+                      : part.image_url?.url;
+                  if (!url || seenImages.has(url)) return '';
+                  seenImages.add(url);
+                  return imageMarkdown(url);
+                }
+                throw new Error('Unsupported content part');
+              },
+            )
+            .join('');
+        }
+        for (const image of choice.delta?.images ?? []) {
+          const url = image.image_url?.url ?? image.url;
+          if (url && !seenImages.has(url)) {
+            seenImages.add(url);
+            text = (text ?? '') + imageMarkdown(url);
+          }
+        }
         if (text !== undefined && text !== null && typeof text !== 'string')
           throw new Error('Invalid model content');
         if (text) {
@@ -280,15 +369,17 @@ export class AiService {
           yield { text };
         }
         if (choice.finish_reason != null) {
-          if (!['stop', 'length'].includes(choice.finish_reason))
+          if (!['stop', 'length', 'tool_calls'].includes(choice.finish_reason))
             throw new Error('Model did not produce a text completion');
           finished = true;
-          yield { finishReason: choice.finish_reason };
+          if (choice.finish_reason !== 'tool_calls')
+            yield { finishReason: choice.finish_reason };
         }
       }
       throw new Error('Model stream ended without DONE');
     } catch (error) {
       if (signal.aborted) throw error;
+      if (error instanceof HttpException) throw error;
       throw new BadGatewayException('模型输出中断或格式不正确');
     }
   }

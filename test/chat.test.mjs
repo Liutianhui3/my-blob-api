@@ -228,8 +228,11 @@ test('authenticated POST streaming, browser client, upstream failures, timeout a
     async () => {
       mode = 'normal';
       await invoke({ content: '我叫什么？' });
-      assert.deepEqual(requests.at(-1).body.messages, [
-        { role: 'system', content: '你是助手' },
+      const messages = requests.at(-1).body.messages;
+      assert.equal(messages[0].role, 'system');
+      assert.match(messages[0].content, /^你是助手\n/);
+      assert.match(messages[0].content, /xlsx/);
+      assert.deepEqual(messages.slice(1), [
         { role: 'user', content: '我叫小明' },
         { role: 'assistant', content: '你好，小明' },
         { role: 'user', content: '我叫什么？' },

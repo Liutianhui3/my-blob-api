@@ -79,10 +79,11 @@ test('RAG context stays within budget, preserves the question, and treats refere
   assert.ok(
     messages.reduce((n, m) => n + Buffer.byteLength(m.content) + 32, 0) <= 1600,
   );
-  assert.deepEqual(ai.buildMessages([], '你好'), [
-    { role: 'system', content: '助手' },
-    { role: 'user', content: '你好' },
-  ]);
+  const plain = ai.buildMessages([], '你好');
+  assert.equal(plain[0].role, 'system');
+  assert.match(plain[0].content, /^助手\n/);
+  assert.match(plain[0].content, /xlsx/);
+  assert.deepEqual(plain.slice(1), [{ role: 'user', content: '你好' }]);
 });
 
 test('chat rejects another user conversation before any retrieval', async () => {

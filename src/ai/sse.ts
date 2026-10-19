@@ -14,7 +14,7 @@ export async function* sseData(
       buffer += done
         ? decoder.decode()
         : decoder.decode(value, { stream: true });
-      if (buffer.length > 1_048_576) throw new Error('SSE line too large');
+      if (buffer.length > 12_000_000) throw new Error('SSE line too large');
       while (true) {
         const position = buffer.search(/[\r\n]/);
         if (position === -1) break;
@@ -35,7 +35,7 @@ export async function* sseData(
           const content =
             line === 'data' ? '' : line.slice(5).replace(/^ /, '');
           eventSize += content.length;
-          if (eventSize > 1_048_576) throw new Error('SSE event too large');
+          if (eventSize > 12_000_000) throw new Error('SSE event too large');
           data.push(content);
         }
       }
