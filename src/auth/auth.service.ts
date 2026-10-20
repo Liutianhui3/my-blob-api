@@ -15,13 +15,11 @@ import {
 } from 'node:crypto';
 import { DatabaseService } from '../database/database.service.js';
 import { userFields as fields } from '../user/user.model.js';
-import { CaptchaService } from './captcha.service.js';
 
 @Injectable()
 export class AuthService {
   constructor(
     @Inject(DatabaseService) private readonly database: DatabaseService,
-    @Inject(CaptchaService) private readonly captcha: CaptchaService,
   ) {}
 
   async register(body: unknown) {
@@ -45,9 +43,8 @@ export class AuthService {
     }
   }
 
-  async login(body: unknown, userIp: string) {
+  async login(body: unknown) {
     const value = this.authInput(body, false);
-    await this.captcha.verify(body, userIp);
     const result = await this.database.pool.query(
       `SELECT ${fields}, password_hash FROM users WHERE LOWER(username) = LOWER($1)`,
       [value.username],
@@ -108,7 +105,7 @@ export class AuthService {
           ![
             'username',
             'password',
-            ...(register ? ['email'] : ['captchaTicket', 'captchaRandstr']),
+            ...(register ? ['email'] : []),
           ].includes(key),
       )
     )

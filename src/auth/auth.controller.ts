@@ -23,11 +23,8 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(200)
-  login(@Body() body: unknown, @Req() request: Request) {
-    return this.auth.login(
-      body,
-      request.ip || request.socket.remoteAddress || '',
-    );
+  login(@Body() body: unknown) {
+    return this.auth.login(body);
   }
 
   @Get('me')

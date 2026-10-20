@@ -1,4 +1,3 @@
-import { CaptchaService } from '../dist/auth/captcha.service.js';
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,7 +29,6 @@ test(
         connectionString: process.env.TEST_DATABASE_URL,
       });
       const module = await Test.createTestingModule({ imports: [AppModule] })
-        .overrideProvider(CaptchaService).useValue({ verify: async () => {} })
         .overrideProvider(DatabaseService)
         .useValue(database)
         .compile();

@@ -393,12 +393,3 @@ SSE 路由需关闭代理响应缓冲和缓存，并配置大于聊天超时的�
 建议优先扩展 PDF 解析与页码来源，再建立真实问题评测集，根据结果完善检索策略、后台任务和权限体系。
 
 
-## 登录真人验证
-
-登录请求必须通过腾讯云 `DescribeCaptchaResult` 验证后才校验密码和签发会话。前端发送 `captchaTicket`、`captchaRandstr`，验证码应用 ID 与前端保持一致。
-
-在后端 `.env` 设置 `TENCENT_CAPTCHA_APP_ID`、`TENCENT_CAPTCHA_APP_SECRET_KEY`（验证码应用密钥）、`TENCENT_SECRET_ID` 和 `TENCENT_SECRET_KEY`（腾讯云 API 访问凭证，需具有调用 DescribeCaptchaResult 的权限）。应用密钥不能代替 API 访问凭证。所有密钥仅留在本地或部署平台的环境变量中。
-
-验证码缺失、失效、重放、容灾票据、上游异常或配置缺失均拒绝登录。注册接口本次不变。反向代理部署时，将可信代理 IP/CIDR 配入 `TRUST_PROXY`，代理应覆盖转发 IP 头；默认不信任客户端自带的 X-Forwarded-For。
-
-测试使用模拟腾讯云响应，不调用真实验证码服务；数据库集成测试单独替换验证码 provider，避免依赖真实人机挑战。

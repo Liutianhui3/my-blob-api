@@ -4,12 +4,11 @@ import { DatabaseModule } from '../database/database.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { AuthGuard } from './guards/auth.guard.js';
-import { CaptchaService } from './captcha.service.js';
 
 @Module({
   imports: [DatabaseModule],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard, AdminGuard, CaptchaService],
+  providers: [AuthService, AuthGuard, AdminGuard],
   exports: [AuthService, AuthGuard, AdminGuard],
 })
 export class AuthModule {}
